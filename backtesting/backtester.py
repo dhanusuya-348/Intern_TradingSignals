@@ -12,7 +12,7 @@ from logic.signal_timer import estimate_signal_duration
 from logic.signal_engine import generate_live_signal as generate_backtest_signal
 
 # Load historical sentiment data
-url = "https://tradingsignals-algo-1yhi.onrender.com/sentiment/csv"
+url = "https://intern-tradingsignals.onrender.com/sentiment/csv"
 sentiment_df = pd.read_csv(url, names=["timestamp", "symbol", "sentiment"], header=None)
 sentiment_df["timestamp"] = pd.to_datetime(sentiment_df["timestamp"])
 
