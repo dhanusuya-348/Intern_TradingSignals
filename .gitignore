@@ -1,0 +1,17 @@
+# Ignore Python environments
+venv/
+
+# Bytecode / cache
+__pycache__/
+*.pyc
+*.pyo
+
+# VS Code settings
+.vscode/
+
+# Logs and OS junk
+*.log
+.DS_Store
+
+# Reports (optional if you auto-generate them)
+reports/
