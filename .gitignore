@@ -14,7 +14,7 @@ __pycache__/
 .DS_Store
 
 # Reports (optional if you auto-generate them)
-reports/generate_pdfs/
+reports/generated_pdfs/
 reports/plots/
 
 # Allow tracking of other files in reports/
