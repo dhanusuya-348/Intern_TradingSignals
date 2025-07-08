@@ -19,16 +19,19 @@ def evaluate_backtest_results(df):
     hold_signals = df[df['signal'] == 'HOLD']
 
     success_rate = round((len(success_signals) / total_signals) * 100, 2) if total_signals else 0
-    avg_profit = round(df['net_return_percent'].mean(), 2) if 'net_return_percent' in df.columns else 0.0
-
-    # ✅ Cumulative Net Return (Compounded Growth)
+    # Average profit only from successful signals
+    if not success_signals.empty and 'net_return_percent' in success_signals.columns:
+        avg_profit = round(success_signals['net_return_percent'].mean(), 2)
+    else:
+        avg_profit = 0.0
+    # Cumulative Net Return (Compounded Growth)
     if "net_return_percent" in df.columns:
         df["return_multiplier"] = 1 + (df["net_return_percent"] / 100)
         cumulative_return = round((df["return_multiplier"].prod() - 1) * 100, 2)
     else:
         cumulative_return = 0.0
 
-    # ✅ Total Gains and Losses
+    # Total Gains and Losses
     total_gains = round(success_signals["net_return_percent"].sum(), 2) if not success_signals.empty else 0.0
     total_losses = round(failed_signals["net_return_percent"].sum(), 2) if not failed_signals.empty else 0.0
 

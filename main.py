@@ -176,7 +176,7 @@ def run_trading_pipeline():
     risk_info = {
         "stop_loss": risk_result['suggested_stop_loss'],
         "take_profit": risk_result['suggested_take_profit'],
-        "rr_ratio": risk_result['risk_reward_ratio'],
+        "rr_ratio": risk_result['risk_reward_label'],
         "risk_level": risk_result['risk_level'].upper(),
         "expected_profit_percent": risk_result['expected_profit_percent']
     }

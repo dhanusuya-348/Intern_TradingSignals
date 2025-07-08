@@ -1,5 +1,5 @@
-#logic\risk_manager.py
 import numpy as np
+from fractions import Fraction
 
 def calculate_atr(df, period=14):
     df = df.copy()
@@ -48,6 +48,7 @@ def calculate_risk_management(df, signal, volatility_level, indicators, backtest
     if df.empty or signal not in ["BUY", "SELL"]:
         return {
             'risk_reward_ratio': 0.0,
+            'risk_reward_label': "1:0",
             'suggested_stop_loss': 0.0,
             'suggested_take_profit': 0.0,
             'risk_level': 'neutral',
@@ -60,6 +61,7 @@ def calculate_risk_management(df, signal, volatility_level, indicators, backtest
     if atr == 0.0 or np.isnan(atr):
         return {
             'risk_reward_ratio': 0.0,
+            'risk_reward_label': "1:0",
             'suggested_stop_loss': 0.0,
             'suggested_take_profit': 0.0,
             'risk_level': 'invalid',
@@ -101,10 +103,19 @@ def calculate_risk_management(df, signal, volatility_level, indicators, backtest
     risk_reward_ratio = round(reward / risk, 2) if risk != 0 else 0.0
     expected_profit_percent = round(abs(raw_return), 2)
 
+    # ✅ Simplify as proper fraction using fractions module
+    try:
+        ratio = Fraction(risk).limit_denominator(1000) / Fraction(reward).limit_denominator(1000)
+        simplified = ratio.limit_denominator()
+        risk_reward_label = f"{simplified.numerator} : {simplified.denominator}"
+    except:
+        risk_reward_label = f"{round(risk, 2)} : {round(reward, 2)}"
+
     # ❌ Filter weak trades more strictly
     if risk_reward_ratio < 1.2 or expected_profit_percent < 0.25:
         return {
             'risk_reward_ratio': risk_reward_ratio,
+            'risk_reward_label': risk_reward_label,
             'suggested_stop_loss': stop_loss,
             'suggested_take_profit': take_profit,
             'risk_level': 'too_weak',
@@ -113,6 +124,7 @@ def calculate_risk_management(df, signal, volatility_level, indicators, backtest
 
     return {
         'risk_reward_ratio': risk_reward_ratio,
+        'risk_reward_label': risk_reward_label,
         'suggested_stop_loss': stop_loss,
         'suggested_take_profit': take_profit,
         'risk_level': risk_level,
