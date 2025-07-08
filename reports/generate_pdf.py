@@ -6,6 +6,8 @@ import requests
 import os
 from urllib.parse import urlparse
 import tempfile
+import matplotlib.pyplot as plt
+
 
 def remove_unicode(text):
     return re.sub(r'[^\x00-\x7F]+', '', text)
@@ -659,21 +661,46 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
     # 1D. Top 5 Sentiment Headlines
     if headlines:
         pdf.add_section_title("1D. Top 10 Sentiment Headlines 📰")
-        explanation = {
+        
+        for i, item in enumerate(headlines[:10], 1):
+            title = remove_unicode(item.get("title", ""))
+            score = item.get("score", 0)
+            published = item.get("published", "N/A")
+            source = item.get("source", "Unknown")
+            link = item.get("link", "")
+            category = item.get("category", "")
+            
+            emoji = "[+]" if score > 0.25 else "[-]" if score < -0.25 else "[·]"
+            headline_color = pdf.get_sentiment_color(score)
+
+            # Headline with Score
+            pdf.set_font("Arial", "B", 10)
+            pdf.set_text_color(*headline_color)
+            pdf.multi_cell(0, 6, f"{i}. {emoji} {title} (Score: {score:.2f})")
+            
+            # Source Info
+            pdf.set_font("Arial", "", 8)
+            pdf.set_text_color(100, 100, 100)
+            pdf.multi_cell(0, 5,
+                f"Published: {published}| Source: {source}| Category: {category if category else 'N/A'}"
+            )
+            
+            # Link
+            pdf.set_text_color(50, 50, 200)
+            pdf.multi_cell(0, 5, f"{link}")
+            
+            pdf.ln(2)  # space between entries
+
+        # Add sentiment explanation
+        signal_sentiment = signal_info.get("sentiment", "neutral")
+        explanation_color = pdf.get_sentiment_color(signal_sentiment)
+        explanation_text = {
             "bullish": "Most headlines had a positive tone. Market sentiment appears optimistic.",
             "bearish": "Many headlines indicated negative or fearful tone. Market may be under pressure.",
             "neutral": "Headlines showed mixed or weak sentiment. Market is undecided or consolidating."
         }
-
-        for i, (headline, score) in enumerate(headlines[:10], 1):
-            emoji = "📈" if score > 0.25 else "📉" if score < -0.25 else "🔸"
-            headline_color = pdf.get_sentiment_color(score)
-            pdf.add_paragraph(f"{i}. {emoji} {remove_unicode(headline)} (Score: {score:.2f})", color=headline_color)
-
-        # Add explanation based on score
-        signal_sentiment = signal_info.get("sentiment", "neutral")
-        explanation_color = pdf.get_sentiment_color(signal_sentiment)
-        pdf.add_paragraph(f"\n📘 **Sentiment Interpretation**: {explanation.get(signal_sentiment, 'No data.')}", color=explanation_color)
+        pdf.add_paragraph(f"\nSentiment Interpretation: {explanation_text.get(signal_sentiment, 'No data.')}",
+                        color=explanation_color)
 
     # 1E. Indicators
     if 'indicators' in signal_info:
@@ -705,29 +732,48 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
 
     # 2. Risk Management
     pdf.add_section_title("2. Risk Management")
+
+    # Extract entry price
+    entry_price = "N/A"
+    try:
+        price_df = signal_info.get("price_snapshot", None)
+        if isinstance(price_df, pd.DataFrame) and not price_df.empty:
+            raw_entry = price_df["close"].iloc[-1]
+            entry_price = f"{raw_entry:,.2f}"
+        else:
+            raw_entry = float(risk_info.get("entry_price", 0))
+    except:
+        raw_entry = float(risk_info.get("entry_price", 0))
+
+    # Add risk details
+    pdf.add_paragraph(f"Entry Price: {entry_price}", color=(0, 0, 200), bold=True)
     pdf.add_paragraph(f"Stop Loss: {risk_info['stop_loss']}", color=(200, 0, 0), bold=True)
     pdf.add_paragraph(f"Take Profit: {risk_info['take_profit']}", color=(0, 100, 0), bold=True)
     pdf.add_paragraph(f"Risk-Reward Ratio: {risk_info['rr_ratio']}", bold=True)
-        
-    # Color code risk level
+
+    # Risk Level
     risk_level = risk_info['risk_level'].lower()
-    if 'low' in risk_level:
-        risk_color = (0, 100, 0)
-    elif 'high' in risk_level:
-        risk_color = (200, 0, 0)
-    else:
-        risk_color = (200, 100, 0)
+    risk_color = (0, 100, 0) if 'low' in risk_level else (200, 0, 0) if 'high' in risk_level else (200, 100, 0)
     pdf.add_paragraph(f"Risk Level: {risk_info['risk_level']}", color=risk_color, bold=True)
-    
-    # Color code expected profit
+
+    # Expected Profit
     try:
-        profit_val = float(risk_info['expected_profit_percent'].replace('%', ''))
+        profit_val = float(str(risk_info['expected_profit_percent']).replace('%', ''))
         profit_color = (0, 100, 0) if profit_val > 0 else (200, 0, 0)
     except:
         profit_color = (0, 0, 0)
     pdf.add_paragraph(f"Expected Profit % : {risk_info['expected_profit_percent']}", color=profit_color, bold=True)
 
-    # Add note for HOLD signals
+    # Formal explanation
+    pdf.add_paragraph(
+        f"This risk management setup is based on the entry price of {entry_price}, "
+        f"with a Stop Loss defined at {risk_info['stop_loss']} and a Take Profit target at {risk_info['take_profit']}. "
+        f"The system uses an intelligent volatility-adjusted approach for risk placement, incorporating factors such as "
+        f"market trend strength, overall sentiment, and asset-specific volatility to dynamically adjust the buffer zones. "
+        f"The Risk-Reward ratio of {risk_info['rr_ratio']} reflects the balance between potential downside protection and profit opportunity."
+    )
+
+    # HOLD Note
     if signal_info['signal'].upper() == "HOLD":
         pdf.add_paragraph(
             "Note: As this is a HOLD signal, Stop Loss, Take Profit, and expected profit values are set to 0 by default. "
@@ -736,17 +782,92 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
             bold=True
         )
 
+    # ➕ Clean and accurate Risk Management Plot
+    try:
+        entry = float(str(raw_entry).replace(",", ""))
+        sl = float(risk_info['stop_loss'])
+        tp = float(risk_info['take_profit'])
+
+        import matplotlib.pyplot as plt
+        import os
+
+        levels = [sl, entry, tp]
+        labels = ['Stop Loss', 'Entry Price', 'Take Profit']
+        colors = ['red', 'blue', 'green']
+
+        plt.figure(figsize=(10, 4))
+        for level, label, color in zip(levels, labels, colors):
+            plt.axhline(y=level, color=color, linestyle='--', linewidth=2, label=f"{label}: {level:,.2f}")
+
+        # Fill zones
+        plt.fill_betweenx([sl, entry], 0, 1, color='red', alpha=0.1, transform=plt.gca().get_yaxis_transform())
+        plt.fill_betweenx([entry, tp], 0, 1, color='green', alpha=0.1, transform=plt.gca().get_yaxis_transform())
+
+        plt.title("Risk Management Levels", fontsize=14, fontweight='bold')
+        plt.xticks([])
+        plt.yticks(fontsize=10)
+        plt.legend(loc="best", fontsize=10)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+
+        os.makedirs("reports/plots", exist_ok=True)
+        img_path = "reports/plots/risk_management_plot.png"
+        plt.savefig(img_path)
+        plt.close()
+
+        pdf.add_image(img_path, size_type="small")
+
+    except Exception as e:
+        pdf.add_paragraph(f"(Plot Error: {e})", color=(255, 0, 0))
+
     # 3. Timing
     pdf.add_section_title("3. Signal Timing")
+
     start = timing_info['start']
     end = timing_info['end']
     duration = timing_info['duration']
     formatted_start = start.strftime('%Y-%m-%d %H:%M:%S') if start else 'N/A'
     formatted_end = end.strftime('%Y-%m-%d %H:%M:%S') if end else 'N/A'
+
     pdf.add_paragraph(f"Valid From: {formatted_start}")
     pdf.add_paragraph(f"Valid To: {formatted_end}")
     pdf.add_paragraph(f"Estimated Duration: {duration}")
     pdf.add_paragraph("Note: This is an estimated signal validity based on ATR, volatility, and confidence. No future data is used.")
+
+    # Entry and Exit Prices
+    pdf.ln(1)
+    pdf.add_section_title("3B. Entry and Exit Price Range")
+
+    # Entry Price from latest close in price_snapshot
+    entry_price = "N/A"
+    exit_price_tp = "N/A"
+    exit_price_sl = "N/A"
+    exit_price_timing = "N/A"
+
+    try:
+        price_df = signal_info.get("price_snapshot", None)
+        if isinstance(price_df, pd.DataFrame) and not price_df.empty:
+            entry_price = price_df["close"].iloc[-1]
+            exit_price_timing = price_df["close"].iloc[-1]  # assumed
+
+            # Format them
+            entry_price = f"{entry_price:,.2f}"
+            exit_price_timing = f"{exit_price_timing:,.2f}"
+    except:
+        pass
+
+    # From risk_info
+    try:
+        exit_price_tp = f"{float(risk_info['take_profit']):,.2f}"
+        exit_price_sl = f"{float(risk_info['stop_loss']):,.2f}"
+    except:
+        pass
+
+    pdf.add_paragraph(f"📥 Entry Price: {entry_price}", bold=True)
+    pdf.add_paragraph(f"📤 Exit if Take Profit Triggered: {exit_price_tp}", color=(0, 100, 0), bold=True)
+    pdf.add_paragraph(f"📉 Exit if Stop Loss Triggered: {exit_price_sl}", color=(200, 0, 0), bold=True)
+    pdf.add_paragraph(f"⏳ Note: Exit if the Duration is Expired before the Price Hit Stop Loss or Take Profit.", color=(100, 100, 100), bold=True)
+
 
     # 4. Backtest Table with row coloring
     pdf.add_section_title("4. Backtest Table (Last 250 candles)")

@@ -21,18 +21,22 @@ def get_sentiment_score(symbol, print_news=True):
     scored_headlines = []
     total_score = 0
 
-    for text in headlines:
-        vs = analyzer.polarity_scores(text)
+    for item in headlines:
+        vs = analyzer.polarity_scores(item['text'])
         compound = vs["compound"]
+        item["score"] = compound
         total_score += compound
-        scored_headlines.append((text, compound))
+        scored_headlines.append(item)
 
     avg_score = total_score / len(scored_headlines)
 
     if print_news:
         print(f"\nUsing {len(scored_headlines)} headlines:")
-        for i, (h, s) in enumerate(scored_headlines[:10], 1):
-            print(f"{i}. {h} (score: {s})")
+        for i, item in enumerate(scored_headlines[:10], 1):
+            print(f"\n{i}. {item['title']} ({item['score']:.2f})")
+            print(f"   Source: {item['source']} | Published: {item['published']}")
+            print(f"   Link: {item['link']}")
+
 
     if avg_score >= 0.25:
         sentiment = "bullish"
