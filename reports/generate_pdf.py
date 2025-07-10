@@ -1,5 +1,4 @@
 from fpdf import FPDF
-import datetime
 import re
 import pandas as pd
 import requests
@@ -7,8 +6,10 @@ import os
 from urllib.parse import urlparse
 import tempfile
 import matplotlib.pyplot as plt
-
-
+from datetime import datetime, timedelta
+from dateutil import parser
+import matplotlib.dates as mdates
+        
 def remove_unicode(text):
     return re.sub(r'[^\x00-\x7F]+', '', text)
 
@@ -188,7 +189,7 @@ class PDFReport(FPDF):
         self.cell(0, 10, "TradingSignals Report", ln=True, align="C")
         self.set_font("Arial", "B", 9)
         self.set_text_color(100, 100, 100)
-        self.cell(0, 8, f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align="C")
+        self.cell(0, 8, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align="C")
         self.ln(4)
         self.set_draw_color(180, 180, 180)
         self.rect(5.0, 5.0, 287.0, 200.0)  # Landscape dimensions (A4 = 297 x 210mm)
@@ -433,7 +434,13 @@ class PDFReport(FPDF):
             "stop_loss": 18,
             "exit_reason": 16,
             "Return %": 14,
-            "result": 14
+            "result": 14,
+            "Snapshot Time": 26,
+            "Close": 16,
+            "Volume": 16,
+            "Historical Time": 26,
+            "Historical Close": 25,
+            "Historical Volume": 26
         }
 
         # Table header
@@ -629,7 +636,6 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
 
     pdf.add_paragraph(explanation_text)
 
-
     # 1C. Price Snapshot
     if 'price_snapshot' in signal_info:
         pdf.ln(2)
@@ -658,14 +664,72 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
         # Price snapshot table without row coloring
         pdf.add_table(price_snapshot, list(price_snapshot.columns), apply_row_coloring=False)
 
+    # 1C.2 Historical Price Points - One Week Before Each Snapshot Row
+    pdf.add_section_title("1C.2 Historical Price Points (1 Week Before Each Snapshot Row)")
+
+    try:
+        df = signal_info["price_snapshot"].copy()
+        df.index = pd.to_datetime(df.index)
+        df.sort_index(inplace=True)
+
+        snapshot_df = df.tail(5).copy()
+        snapshot_df.index = pd.to_datetime(snapshot_df.index)
+
+        historical_rows = []
+
+        for timestamp in snapshot_df.index:
+            label_date = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            current_close = snapshot_df.loc[timestamp]["close"]
+            current_volume = snapshot_df.loc[timestamp]["volume"]
+
+            # Target time: 1 week before
+            target_time = timestamp - timedelta(days=7)
+
+            # Check if target time is within available data
+            if target_time < df.index.min():
+                week_ago_date = "N/A"
+                hist_close = "N/A"
+                hist_volume = "N/A"
+            else:
+                # Find closest available time
+                nearest_idx = df.index.get_indexer([target_time], method="nearest")[0]
+                week_ago_timestamp = df.index[nearest_idx]
+                week_ago_date = week_ago_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+
+                row = df.iloc[nearest_idx]
+                hist_close = f"{row['close']:,.2f}"
+                hist_volume = f"{row['volume']:,.2f}"
+
+            historical_rows.append({
+                "Snapshot Time": label_date,
+                "Close": f"{current_close:,.2f}",
+                "Volume": f"{current_volume:,.2f}",
+                "Historical Time": week_ago_date,
+                "Historical Close": hist_close,
+                "Historical Volume": hist_volume
+            })
+
+        hist_df = pd.DataFrame(historical_rows)
+        pdf.add_table(hist_df, list(hist_df.columns), apply_row_coloring=False)
+
+    except Exception as e:
+        pdf.add_paragraph(f"(Historical price lookup failed: {e})", color=(255, 0, 0))
+
     # 1D. Top 5 Sentiment Headlines
     if headlines:
-        pdf.add_section_title("1D. Top 10 Sentiment Headlines 📰")
+        pdf.add_section_title("1D. Top 10 Sentiment Headlines")
         
         for i, item in enumerate(headlines[:10], 1):
             title = remove_unicode(item.get("title", ""))
             score = item.get("score", 0)
-            published = item.get("published", "N/A")
+            published_raw = item.get("published", "N/A")
+            try:
+                # Parse and strip timezone
+                dt = parser.parse(published_raw)
+                published = dt.strftime("%Y-%m-%d %H:%M")
+            except:
+                published = published_raw  # fallback if parse fails
+
             source = item.get("source", "Unknown")
             link = item.get("link", "")
             category = item.get("category", "")
@@ -682,7 +746,8 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
             pdf.set_font("Arial", "", 8)
             pdf.set_text_color(100, 100, 100)
             pdf.multi_cell(0, 5,
-                f"Published: {published}| Source: {source}| Category: {category if category else 'N/A'}"
+                # f"Published: {published}| Source: {source}| Category: {category if category else 'N/A'}"
+                f"Published: {published}| Source: {source}"
             )
             
             # Link
@@ -702,33 +767,206 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
         pdf.add_paragraph(f"\nSentiment Interpretation: {explanation_text.get(signal_sentiment, 'No data.')}",
                         color=explanation_color)
 
-    # 1E. Indicators
-    if 'indicators' in signal_info:
-        pdf.add_section_title("1E. Technical Indicators")
-        ind = signal_info['indicators']
-        
-        # Color code MACD
-        macd_text = f"MACD Signal: {ind.get('macd', 'N/A')}"
-        macd_color = pdf.get_signal_color(ind.get('macd', 'N/A'))
-        pdf.add_paragraph(macd_text, color=macd_color, bold=True)
-        
-        rsi_raw = ind.get('rsi', 'N/A')
-        if isinstance(rsi_raw, tuple) and len(rsi_raw) == 2:
-            rsi_signal = rsi_raw[1]
-        else:
-            rsi_signal = str(rsi_raw)
+    # 1E. Technical Indicators (Detailed)
+    if 'indicators' in signal_info and 'price_snapshot' in signal_info:
+        pdf.add_section_title("1E. Technical Indicators (With Context & Visuals)")
 
-        # Color code RSI
-        rsi_text = f"RSI Signal: {rsi_signal}"
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        import os
+
+        ind = signal_info['indicators']
+        timeframe_str = interval.upper()
+
+        # === MACD ===
+        macd_value = ind.get('macd', 'N/A')
+        macd_color = pdf.get_signal_color(macd_value)
+        pdf.set_font("Arial", "B", 10)
+        pdf.set_text_color(*macd_color)
+        pdf.multi_cell(0, 6, f"MACD Signal: {macd_value} (Timeframe: {timeframe_str}, Fast EMA: 12, Slow EMA: 26, Signal: 9)")
+        
+        pdf.set_font("Arial", "", 8)
+        pdf.set_text_color(50, 50, 50)
+        pdf.multi_cell(0, 5, "MACD helps identify momentum shifts. A bullish crossover (MACD > Signal) may indicate a potential BUY, while a bearish crossover suggests a SELL.")
+
+        # === RSI ===
+        rsi_raw = ind.get('rsi', 'N/A')
+        rsi_signal = rsi_raw[1] if isinstance(rsi_raw, tuple) and len(rsi_raw) == 2 else str(rsi_raw)
         rsi_color = pdf.get_signal_color(rsi_signal)
-        pdf.add_paragraph(rsi_text, color=rsi_color, bold=True)
-        
-        # Color code Bollinger Bands
-        bb_text = f"Bollinger Bands Signal: {ind.get('bb', 'N/A')}"
-        bb_color = pdf.get_signal_color(ind.get('bb', 'N/A'))
-        pdf.add_paragraph(bb_text, color=bb_color, bold=True)
-        
-        pdf.add_paragraph(f"Volatility: {ind.get('volatility', 'N/A')}")
+
+        pdf.set_font("Arial", "B", 10)
+        pdf.set_text_color(*rsi_color)
+        pdf.multi_cell(0, 6, f"RSI Signal: {rsi_signal} (Timeframe: {timeframe_str}, Period: 14)")
+
+        pdf.set_font("Arial", "", 8)
+        pdf.set_text_color(50, 50, 50)
+        pdf.multi_cell(0, 5, "RSI (Relative Strength Index) measures momentum. Values above 70 may indicate overbought (SELL zone), while values below 30 may indicate oversold (BUY zone).")
+
+        # === Bollinger Bands ===
+        bb_signal = ind.get('bb', 'N/A')
+        bb_color = pdf.get_signal_color(bb_signal)
+
+        pdf.set_font("Arial", "B", 10)
+        pdf.set_text_color(*bb_color)
+        pdf.multi_cell(0, 6, f"Bollinger Bands Signal: {bb_signal} (Timeframe: {timeframe_str}, SMA: 20, ±2 Std Dev)")
+
+        pdf.set_font("Arial", "", 8)
+        pdf.set_text_color(50, 50, 50)
+        pdf.multi_cell(0, 5, "Bollinger Bands show price volatility. When price breaks the bands, it may signal a reversal or a breakout opportunity.")
+
+        # === Volatility ===
+        vol_value = ind.get('volatility', 'N/A')
+        pdf.set_font("Arial", "B", 10)
+        pdf.set_text_color(0, 0, 0)
+        pdf.multi_cell(0, 6, f"Volatility Index: {vol_value} (Standard deviation over recent candles)")
+
+        pdf.set_font("Arial", "", 8)
+        pdf.set_text_color(50, 50, 50)
+        pdf.multi_cell(0, 5, "Volatility helps assess market risk. High volatility = greater price swings = more caution needed.")
+
+        # === Create Combined Plot and Display ===
+        try:
+            df = signal_info['price_snapshot'].copy()
+            df.index = pd.to_datetime(df.index)
+            
+            # Sort by index to ensure proper chronological order
+            df = df.sort_index()
+            
+            # Take only the last 100 data points for better visualization
+            df = df.tail(100)
+
+            # Ensure all relevant columns are float and handle missing data
+            for col in ['close', 'open', 'high', 'low', 'volume']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # Calculate technical indicators if they don't exist
+            if 'macd_line' not in df.columns or 'macd_signal' not in df.columns:
+                # Simple MACD calculation
+                exp1 = df['close'].ewm(span=12).mean()
+                exp2 = df['close'].ewm(span=26).mean()
+                df['macd_line'] = exp1 - exp2
+                df['macd_signal'] = df['macd_line'].ewm(span=9).mean()
+                df['macd_histogram'] = df['macd_line'] - df['macd_signal']
+            
+            if 'rsi' not in df.columns:
+                # Simple RSI calculation
+                delta = df['close'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                rs = gain / loss
+                df['rsi'] = 100 - (100 / (1 + rs))
+            
+            if 'upper_band' not in df.columns or 'lower_band' not in df.columns:
+                # Simple Bollinger Bands calculation
+                rolling_mean = df['close'].rolling(window=20).mean()
+                rolling_std = df['close'].rolling(window=20).std()
+                df['upper_band'] = rolling_mean + (rolling_std * 2)
+                df['lower_band'] = rolling_mean - (rolling_std * 2)
+                df['middle_band'] = rolling_mean
+
+            # Ensure we have valid data
+            df = df.dropna()
+            
+            if len(df) < 10:
+                raise ValueError("Insufficient data for plotting")
+
+            # Create the plot with proper styling
+            fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True, gridspec_kw={'hspace': 0.3})
+            
+            # Set the style
+            plt.style.use('default')
+            
+            # --- Price + Bollinger Bands ---
+            axes[0].plot(df.index, df['close'], color='#1f77b4', linewidth=2, label='Close Price')
+            axes[0].fill_between(df.index, df['lower_band'], df['upper_band'], 
+                               color='lightblue', alpha=0.3, label='Bollinger Bands')
+            axes[0].plot(df.index, df['upper_band'], color='red', linestyle='--', alpha=0.7, linewidth=1)
+            axes[0].plot(df.index, df['lower_band'], color='red', linestyle='--', alpha=0.7, linewidth=1)
+            axes[0].plot(df.index, df['middle_band'], color='orange', linestyle='-', alpha=0.7, linewidth=1, label='Middle Band (SMA 20)')
+            
+            axes[0].set_title(f"{symbol} - Price + Bollinger Bands", fontsize=12, fontweight='bold')
+            axes[0].legend(loc='upper left', fontsize=8)
+            axes[0].grid(True, alpha=0.3)
+            axes[0].set_ylabel('Price', fontsize=10)
+            
+            # Add current price annotation
+            current_price = df['close'].iloc[-1]
+            axes[0].annotate(f'Current: ${current_price:.2f}', 
+                           xy=(df.index[-1], current_price), 
+                           xytext=(10, 10), textcoords='offset points',
+                           bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
+                           fontsize=8)
+
+            # --- MACD ---
+            axes[1].plot(df.index, df['macd_line'], label='MACD Line', color='blue', linewidth=2)
+            axes[1].plot(df.index, df['macd_signal'], label='Signal Line', color='red', linewidth=2)
+            axes[1].bar(df.index, df['macd_histogram'], label='Histogram', color='green', alpha=0.6, width=0.8)
+            axes[1].axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.8)
+            axes[1].set_title("MACD Indicator", fontsize=12, fontweight='bold')
+            axes[1].legend(loc='upper left', fontsize=8)
+            axes[1].grid(True, alpha=0.3)
+            axes[1].set_ylabel('MACD', fontsize=10)
+            
+            # Add MACD signal annotation
+            current_macd = df['macd_line'].iloc[-1]
+            current_signal = df['macd_signal'].iloc[-1]
+            macd_position = "Bullish" if current_macd > current_signal else "Bearish"
+            axes[1].annotate(f'MACD: {macd_position}', 
+                           xy=(df.index[-1], current_macd), 
+                           xytext=(10, 10), textcoords='offset points',
+                           bbox=dict(boxstyle='round,pad=0.3', 
+                                   facecolor='lightgreen' if macd_position == "Bullish" else 'lightcoral', 
+                                   alpha=0.7),
+                           fontsize=8)
+
+            # --- RSI ---
+            axes[2].plot(df.index, df['rsi'], label='RSI', color='purple', linewidth=2)
+            axes[2].axhline(70, linestyle='--', color='red', linewidth=1, alpha=0.7, label='Overbought (70)')
+            axes[2].axhline(30, linestyle='--', color='green', linewidth=1, alpha=0.7, label='Oversold (30)')
+            axes[2].axhline(50, linestyle='-', color='gray', linewidth=0.8, alpha=0.5)
+            axes[2].fill_between(df.index, 30, 70, alpha=0.1, color='gray')
+            axes[2].set_title("RSI Indicator", fontsize=12, fontweight='bold')
+            axes[2].legend(loc='upper left', fontsize=8)
+            axes[2].grid(True, alpha=0.3)
+            axes[2].set_ylabel('RSI', fontsize=10)
+            axes[2].set_ylim(0, 100)
+            
+            # Add RSI level annotation
+            current_rsi = df['rsi'].iloc[-1]
+            rsi_level = "Overbought" if current_rsi > 75 else "Oversold" if current_rsi < 25 else "Neutral"
+            rsi_color = 'lightcoral' if current_rsi > 75 else 'lightgreen' if current_rsi < 25 else 'lightyellow'
+            axes[2].annotate(f'RSI: {current_rsi:.1f} ({rsi_level})', 
+                           xy=(df.index[-1], current_rsi), 
+                           xytext=(10, 10), textcoords='offset points',
+                           bbox=dict(boxstyle='round,pad=0.3', facecolor=rsi_color, alpha=0.7),
+                           fontsize=8)
+
+            # Format x-axis
+            axes[2].xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+            axes[2].xaxis.set_major_locator(mdates.HourLocator(interval=max(1, len(df)//10)))
+            plt.setp(axes[2].xaxis.get_majorticklabels(), rotation=45)
+            
+            # Set xlabel
+            axes[2].set_xlabel('Time', fontsize=10)
+            
+            # Adjust layout
+            plt.tight_layout()
+            
+            # Save the plot
+            os.makedirs("reports", exist_ok=True)
+            plt.savefig("reports/indicators_summary.png", dpi=150, bbox_inches='tight', facecolor='white')
+            plt.close()
+
+            # Add to PDF if file exists
+            if os.path.exists("reports/indicators_summary.png"):
+                pdf.ln(4)
+                pdf.add_image("reports/indicators_summary.png", size_type='large')
+                pdf.ln(5)
+
+        except Exception as e:
+            pdf.add_paragraph(f"(Could not generate indicator chart: {e})", color=(255, 0, 0))
+            print(f"Plotting error: {e}")  # For debugging
 
     # 2. Risk Management
     pdf.add_section_title("2. Risk Management")
@@ -863,10 +1101,10 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
     except:
         pass
 
-    pdf.add_paragraph(f"📥 Entry Price: {entry_price}", bold=True)
-    pdf.add_paragraph(f"📤 Exit if Take Profit Triggered: {exit_price_tp}", color=(0, 100, 0), bold=True)
-    pdf.add_paragraph(f"📉 Exit if Stop Loss Triggered: {exit_price_sl}", color=(200, 0, 0), bold=True)
-    pdf.add_paragraph(f"⏳ Note: Exit if the Duration is Expired before the Price Hit Stop Loss or Take Profit.", color=(100, 100, 100), bold=True)
+    pdf.add_paragraph(f"Entry Price: {entry_price}", bold=True)
+    pdf.add_paragraph(f"Exit if Take Profit Triggered: {exit_price_tp}", color=(0, 100, 0), bold=True)
+    pdf.add_paragraph(f"Exit if Stop Loss Triggered: {exit_price_sl}", color=(200, 0, 0), bold=True)
+    pdf.add_paragraph(f"Note: Exit if the Duration is Expired before the Price Hit Stop Loss or Take Profit.", color=(100, 100, 100), bold=True)
 
 
     # 4. Backtest Table with row coloring
