@@ -446,7 +446,7 @@ class PDFReport(FPDF):
             "news": 8,
             "volatility": 14,
             "signal": 11,
-            "risk:reward": 19,
+            "reward:risk": 19,
             "duration": 15,
             "conf": 10,
             "exit_price": 16,
@@ -1309,7 +1309,7 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
             bold=True
         )
 
-    # ➕ Clean and accurate Risk Management Plot
+    # Clean and accurate Risk Management Plot
     try:
         entry = float(str(raw_entry).replace(",", ""))
         sl = float(risk_info['stop_loss'])
@@ -1453,7 +1453,7 @@ def format_backtest_table(df, max_rows=30):
     # Rename columns for display
     df.rename(columns={
         "net_return_percent": "return%",
-        "risk_reward_ratio": "risk:reward",
+        "risk_reward_ratio": "reward:risk",
         "estimated_duration_minutes": "duration",
         "confidence": "conf",
         "exit_reason": "exit_rsn",

@@ -3,6 +3,7 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+from matplotlib.dates import DateFormatter
 
 def plot_price_with_indicators(df, backtest_df, symbol, save_path):
     if not isinstance(backtest_df, pd.DataFrame):
@@ -15,11 +16,20 @@ def plot_price_with_indicators(df, backtest_df, symbol, save_path):
     fig, ax = plt.subplots(1, 1, figsize=(14, 8))
     ax.plot(df['close'], label='Close Price', color='black', linewidth=1.5)
     avg_price = df['close'].mean()
-    ax.axhline(avg_price, color='orange', linestyle='--', label='Avg Price', alpha=0.7)
+    ax.axhline(avg_price, color='orange', linestyle='--', label='Average Price', alpha=0.7)
     ax.text(df.index[-1], avg_price * 0.998, f' ${avg_price:.2f}', 
              verticalalignment='top', fontsize=10, color='orange', fontweight='bold')
 
-    added_labels = set()
+    # Track all unique combinations for legend
+    legend_entries = set()
+    
+    # Add dummy entries for all possible combinations to ensure they appear in legend
+    legend_entries.add(('BUY', 'SUCCESS'))
+    legend_entries.add(('BUY', 'FAILURE'))
+    legend_entries.add(('SELL', 'SUCCESS'))
+    legend_entries.add(('SELL', 'FAILURE'))
+    legend_entries.add(('EXIT', 'SUCCESS'))
+    legend_entries.add(('EXIT', 'FAILURE'))
 
     if not backtest_df.empty and 'timestamp' in backtest_df.columns:
         backtest_df['timestamp'] = pd.to_datetime(backtest_df['timestamp'])
@@ -37,16 +47,12 @@ def plot_price_with_indicators(df, backtest_df, symbol, save_path):
                     line_color = 'green' if result == 'SUCCESS' else 'red' if result == 'FAILURE' else 'gray'
                     marker_color = 'darkgreen' if result == 'SUCCESS' else 'darkred' if result == 'FAILURE' else 'gray'
                     marker = '^' if signal == 'BUY' else 'v' if signal == 'SELL' else 'o'
-                    label = f"{signal} Entry ({result})"
 
-                    display_label = label if label not in added_labels else None
-                    added_labels.add(label)
-
-                    # Plot entry point
+                    # Plot entry point (no label here, we'll add comprehensive labels later)
                     ax.scatter(entry_time, entry_price, marker=marker, color=marker_color, 
-                               s=120, zorder=5, label=display_label, edgecolors='white', linewidth=2)
+                               s=120, zorder=5, edgecolors='white', linewidth=2)
 
-                    # Plot entry-exit line without annotations
+                    # Plot entry-exit line with exit points
                     if 'exit_price' in row and not pd.isna(row['exit_price']):
                         exit_price = float(str(row['exit_price']).replace(',', ''))
                         exit_time = entry_time + pd.Timedelta(hours=1)
@@ -59,10 +65,42 @@ def plot_price_with_indicators(df, backtest_df, symbol, save_path):
             except Exception as e:
                 print(f"[Warning] Could not plot backtest entry: {e}")
 
+    # Add comprehensive legend entries with proper symbols
+    # Entry points
+    ax.scatter([], [], marker='^', color='darkgreen', s=120, edgecolors='white', linewidth=2, 
+               label='BUY Entry (Success)', zorder=5)
+    ax.scatter([], [], marker='^', color='darkred', s=120, edgecolors='white', linewidth=2, 
+               label='BUY Entry (Failure)', zorder=5)
+    ax.scatter([], [], marker='v', color='darkgreen', s=120, edgecolors='white', linewidth=2, 
+               label='SELL Entry (Success)', zorder=5)
+    ax.scatter([], [], marker='v', color='darkred', s=120, edgecolors='white', linewidth=2, 
+               label='SELL Entry (Failure)', zorder=5)
+    
+    # Exit points (squares)
+    ax.scatter([], [], marker='s', color='green', s=80, edgecolors='white', linewidth=1, 
+               label='EXIT Point (Success)', zorder=5, alpha=0.8)
+    ax.scatter([], [], marker='s', color='red', s=80, edgecolors='white', linewidth=1, 
+               label='EXIT Point (Failure)', zorder=5, alpha=0.8)
+    
+    # Trade lines
+    ax.plot([], [], color='green', linewidth=3, alpha=0.8, label='Successful Trade')
+    ax.plot([], [], color='red', linewidth=3, alpha=0.8, label='Failed Trade')
+
+    # Format x-axis to show abbreviated month names
+    ax.xaxis.set_major_formatter(DateFormatter('%d %b %Y'))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+
     ax.set_title(f"{symbol.upper()} - Price with Entry/Exit Points", fontweight='bold', fontsize=16)
-    ax.set_ylabel("Price")
-    ax.legend(loc='best')
-    ax.grid(True, alpha=0.3)
+    ax.set_ylabel("Price ($)", fontweight='bold')
+    ax.set_xlabel("Date", fontweight='bold')
+    
+    # Create a more organized legend
+    legend = ax.legend(loc='upper left', bbox_to_anchor=(0, 1), fontsize=10, 
+                      frameon=True, fancybox=True, shadow=True, ncol=2)
+    legend.get_frame().set_facecolor('white')
+    legend.get_frame().set_alpha(0.9)
+    
+    ax.grid(True, alpha=0.3, linestyle='--')
     
     plt.tight_layout()
     price_path = f"{base_path}_price.png"

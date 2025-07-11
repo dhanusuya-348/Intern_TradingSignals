@@ -1,3 +1,5 @@
+#logic\risk_manager.py
+
 import numpy as np
 from fractions import Fraction
 
@@ -75,7 +77,7 @@ def calculate_risk_management(df, signal, volatility_level, indicators, backtest
     reward_multiplier = estimate_reward_multiplier(trend_strength, sentiment, volatility, confidence)
     risk_level = determine_risk_level(reward_multiplier)
 
-    # 🛡️ Adaptive SL logic based on confidence
+    # 🛡 Adaptive SL logic based on confidence
     if confidence >= 85:
         sl_multiplier = 1.2
     elif confidence <= 55:
