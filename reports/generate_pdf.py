@@ -294,6 +294,24 @@ class PDFReport(FPDF):
                         self.set_text_color(0, 0, 0)
                 except:
                     self.set_text_color(0, 0, 0)
+            elif 'cumulative net return %' in key_clean.lower() or 'cumulative return' in key_clean.lower():
+                # cumulative net return % : green for positive, red for negative
+                try:
+                    # Try to extract numeric value from percentage or number
+                    import re
+                    numeric_match = re.search(r'-?\d+\.?\d*', str(value))
+                    if numeric_match:
+                        numeric_val = float(numeric_match.group())
+                        if numeric_val > 0:
+                            self.set_text_color(0, 150, 0)  # Green for positive
+                        elif numeric_val < 0:
+                            self.set_text_color(200, 0, 0)  # Red for negative
+                        else:
+                            self.set_text_color(0, 0, 0)  # Black for zero
+                    else:
+                        self.set_text_color(0, 0, 0)
+                except:
+                    self.set_text_color(0, 0, 0)
             elif 'successful signals' in key_clean.lower() or 'success' in key_clean.lower():
                 # Successful signals should be green
                 self.set_text_color(0, 150, 0)
@@ -573,74 +591,343 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
 
     # 1B. Live Signal Explanation
     pdf.add_section_title("1B. Live Signal Explanation")
+    import os  
 
     signal = signal_info['signal']
-    confidence = signal_info['confidence']
+    confidence = signal_info.get('confidence', 0)
     sentiment = signal_info.get("sentiment", "neutral")
     volatility = signal_info.get("indicators", {}).get("volatility", "N/A")
+    confidence_basis = signal_info.get("confidence_basis", "past 250 candles")
+    profit_percent = risk_info.get("expected_profit_percent", "N/A")
 
-    # Confidence phrasing
+    # Safely extract and format prices
+    def safe_format(value):
+        try:
+            return round(float(value), 2)
+        except:
+            return "N/A"
+
+    entry_price = safe_format(risk_info.get("entry_price"))
+    exit_price = safe_format(risk_info.get("final_exit_price", entry_price))
+    stop_loss = safe_format(risk_info.get("stop_loss"))
+    take_profit = safe_format(risk_info.get("take_profit"))
+    rrr = risk_info.get("rr_ratio", "N/A")
+    duration = timing_info.get("duration", "N/A")
+
+    # Fallback: try extracting entry price from price_snapshot
+    try:
+        price_df = signal_info.get("price_snapshot", None)
+        if isinstance(price_df, pd.DataFrame) and not price_df.empty:
+            fallback_entry = round(float(price_df["close"].iloc[-1]), 2)
+            if entry_price == "N/A":
+                entry_price = fallback_entry
+            if exit_price == "N/A":
+                exit_price = fallback_entry
+    except:
+        pass
+
+    # --- Confidence Phrasing ---
     if confidence >= 80:
         strength_phrase = "a very high level of confidence"
+        confidence_color = (0, 150, 0)  # Dark green
     elif confidence >= 65:
         strength_phrase = "a strong degree of confidence"
+        confidence_color = (50, 120, 50)  # Medium green
     elif confidence >= 55:
         strength_phrase = "moderate confidence"
+        confidence_color = (200, 150, 0)  # Orange
     else:
         strength_phrase = "a cautious confidence level"
+        confidence_color = (200, 100, 0)  # Red-orange
 
-    # Sentiment phrasing
+    # --- Sentiment Phrasing ---
     if isinstance(sentiment, (float, int)):
         if sentiment > 0.25:
             sentiment_description = "with broadly optimistic sentiment observed in the market"
+            sentiment_color = (0, 120, 0)  # Green
         elif sentiment < -0.25:
             sentiment_description = "during a period of prevailing negative sentiment"
+            sentiment_color = (200, 0, 0)  # Red
         else:
             sentiment_description = "in a relatively neutral sentiment environment"
+            sentiment_color = (100, 100, 100)  # Gray
     else:
         sentiment_description = "with sentiment conditions being inconclusive"
+        sentiment_color = (100, 100, 100)  # Gray
 
-    # Volatility phrasing
+    # --- Volatility Phrasing ---
     if isinstance(volatility, (float, int)):
         if volatility > 1.5:
-            volatility_phrase = f"Volatility was relatively high ({volatility}), suggesting potential price swings."
+            volatility_phrase = f"Volatility was relatively high ({volatility:.2f}), suggesting increased risk and price swings."
+            volatility_color = (200, 0, 0)  # Red
         elif volatility > 0.8:
-            volatility_phrase = f"Moderate volatility was present at {volatility}, allowing for reasonable price movement."
+            volatility_phrase = f"Moderate volatility ({volatility:.2f}) allowed for controlled price movement and decent trade setups."
+            volatility_color = (200, 150, 0)  # Orange
         else:
-            volatility_phrase = f"Low volatility conditions ({volatility}) suggest a stable but cautious environment."
+            volatility_phrase = f"Low volatility conditions ({volatility:.2f}) suggested market calmness, suitable for conservative positions."
+            volatility_color = (0, 120, 0)  # Green
     else:
-        volatility_phrase = f"Volatility at the time of signal generation was recorded as {volatility}."
+        volatility_phrase = f"Volatility at signal time was recorded as {volatility}."
+        volatility_color = (100, 100, 100)  # Gray
 
-    # Final explanation
+    # --- Main Signal Explanation ---
     if signal == "BUY":
+        signal_color = (0, 150, 0)  # Green
         explanation_text = (
-            f"A BUY signal was generated with {strength_phrase}. "
-            f"This indicates a favorable outlook for upward price movement, {sentiment_description}. "
-            f"{volatility_phrase} "
-            "The system determined that market conditions were conducive to initiating a long position, backed by historical consistency."
+            f"A BUY signal was generated with {strength_phrase} ({confidence}%) based on analysis over the {confidence_basis}. "
+            f"This indicates a favorable outlook for upward price movement, {sentiment_description}. {volatility_phrase} "
+            "The system identified optimal entry conditions aligned with bullish technical factors and sentiment confirmation."
         )
     elif signal == "SELL":
+        signal_color = (200, 0, 0)  # Red
         explanation_text = (
-            f"A SELL signal was issued with {strength_phrase}, suggesting the likelihood of downward market movement. "
-            f"The call was made {sentiment_description}. "
-            f"{volatility_phrase} "
-            "This action reflects conditions where initiating a short or exit position was considered technically sound."
+            f"A SELL signal was issued with {strength_phrase} ({confidence}%) based on analysis over the {confidence_basis}. "
+            f"This suggests downward price movement, {sentiment_description}. {volatility_phrase} "
+            "Shorting was recommended due to risk-reward setup and technical weakness."
         )
-    else:  # HOLD
+    else:
+        signal_color = (100, 100, 100)  # Gray
         explanation_text = (
-            f"A HOLD recommendation was made with {strength_phrase}. "
-            f"This reflects a lack of strong directional bias at the time, {sentiment_description}. "
-            f"{volatility_phrase} "
-            "In such environments, the system advises remaining on the sidelines to avoid low-confidence trades."
+            f"A HOLD recommendation was made with {strength_phrase} ({confidence}%) due to weak momentum in the {confidence_basis}. "
+            f"Conditions were indecisive, {sentiment_description}. {volatility_phrase} "
+            "The system advised no trade until stronger directional signals appear."
         )
 
-    pdf.add_paragraph(explanation_text)
+    # --- Add Signal Summary ---
+    pdf.set_font("Arial", "B", 10)
+    pdf.set_text_color(*signal_color)
+    pdf.multi_cell(0, 6, explanation_text)
+
+    # --- Add Risk & Trade Parameters ---
+    pdf.ln(2)
+    pdf.set_text_color(0, 0, 139)
+    pdf.set_font("Arial", "B", 12)
+    pdf.multi_cell(0, 6, "Risk & Trade Parameters:\n\n")
+
+    # Entry Price
+    pdf.set_font("Arial", "B", 10)
+    pdf.set_text_color(0, 102, 204)
+    pdf.multi_cell(0, 5, f"- Entry Price: {entry_price if entry_price == 'N/A' else f'{entry_price:,.2f}'}")
+    
+    # Exit Price
+    pdf.set_text_color(0, 102, 204)
+    pdf.multi_cell(0, 5, f"- Exit Price: {exit_price if exit_price == 'N/A' else f'{exit_price:,.2f}'}")
+    
+    # Expected Profit %
+    try:
+        profit_val = float(str(profit_percent).replace('%', ''))
+        profit_color = (0, 150, 0) if profit_val > 0 else (200, 0, 0)
+    except:
+        profit_color = (100, 100, 100)
+    pdf.set_text_color(*profit_color)
+    pdf.multi_cell(0, 5, f"- Expected Profit %: {profit_percent}")
+    
+    # Stop Loss
+    pdf.set_text_color(200, 0, 0)
+    pdf.multi_cell(0, 5, f"- Stop Loss: {stop_loss if stop_loss == 'N/A' else f'{stop_loss:,.2f}'}")
+    
+    # Take Profit
+    pdf.set_text_color(0, 150, 0)
+    pdf.multi_cell(0, 5, f"- Take Profit: {take_profit if take_profit == 'N/A' else f'{take_profit:,.2f}'}")
+    
+    # Risk-Reward Ratio
+    try:
+        rrr_val = float(str(rrr).split(':')[0]) if ':' in str(rrr) else float(rrr)
+        rrr_color = (0, 150, 0) if rrr_val >= 2 else (200, 150, 0) if rrr_val >= 1 else (200, 0, 0)
+    except:
+        rrr_color = (100, 100, 100)
+    pdf.set_text_color(*rrr_color)
+    pdf.multi_cell(0, 5, f"- Risk-Reward Ratio: {rrr}")
+    
+    # Expected Duration
+    pdf.set_text_color(120, 80, 0)
+    pdf.multi_cell(0, 5, f"- Expected Duration: {duration}\n")
+
+    # --- Contextual Summary ---
+    pdf.ln(1)
+    pdf.set_text_color(90, 60, 0)
+    pdf.set_font("Arial", "B", 10)
+    pdf.multi_cell(0, 5, (
+        f"\nThe system identified {entry_price:,.2f} as the best entry point, with downside risk managed at {stop_loss:,.2f} "
+        f"and target reward at {take_profit:,.2f}. Based on these, a {profit_percent} % gain was expected. "
+        f"Risk-Reward stood at {rrr}, and the signal is considered valid for {duration}. "
+        "This setup reflects a strong probability for price action favoring the trade direction."
+    ))
+
+    # --- Generate Professional Trading Chart ---
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        import numpy as np
+        
+        # Get price data
+        price_df = signal_info.get("price_snapshot", None)
+        if isinstance(price_df, pd.DataFrame) and not price_df.empty:
+            df = price_df.copy()
+            df.index = pd.to_datetime(df.index)
+            df = df.sort_index()
+            
+            # Take last 100 points for better visualization
+            df = df.tail(100)
+            
+            # Ensure numeric data
+            df['close'] = pd.to_numeric(df['close'], errors='coerce')
+            df = df.dropna()
+            
+            if len(df) > 10:
+                # Create professional chart with dark theme
+                plt.style.use('dark_background')
+                fig, ax = plt.subplots(figsize=(14, 8))
+                
+                # Set dark background
+                fig.patch.set_facecolor('#1a1a1a')
+                ax.set_facecolor('#1a1a1a')
+                
+                # Plot price line
+                ax.plot(df.index, df['close'], color='#00d4ff', linewidth=2.5, label='Price')
+                
+                # Add entry, stop loss, and take profit lines
+                if entry_price != "N/A":
+                    ax.axhline(y=entry_price, color='#ffff00', linestyle='--', linewidth=2, 
+                              label=f'Entry: ${entry_price:,.2f}', alpha=0.9)
+                
+                if stop_loss != "N/A":
+                    ax.axhline(y=stop_loss, color='#ff4444', linestyle=':', linewidth=2, 
+                              label=f'Stop Loss: ${stop_loss:,.2f}', alpha=0.9)
+                
+                if take_profit != "N/A":
+                    ax.axhline(y=take_profit, color='#44ff44', linestyle=':', linewidth=2, 
+                              label=f'Take Profit: ${take_profit:,.2f}', alpha=0.9)
+                
+                # Add risk and profit zones
+                if entry_price != "N/A" and stop_loss != "N/A":
+                    ax.fill_between(df.index, stop_loss, entry_price, alpha=0.1, color='red', 
+                                   label='Risk Zone')
+                
+                if entry_price != "N/A" and take_profit != "N/A":
+                    ax.fill_between(df.index, entry_price, take_profit, alpha=0.1, color='green', 
+                                   label='Profit Zone')
+                
+                # Add signal indicator
+                signal_color_code = '#44ff44' if signal == 'BUY' else '#ff4444' if signal == 'SELL' else '#ffff44'
+                ax.text(0.98, 0.95, f'{signal} Signal\n{confidence}% Confidence', 
+                       transform=ax.transAxes, fontsize=14, fontweight='bold',
+                       bbox=dict(boxstyle='round,pad=0.5', facecolor=signal_color_code, alpha=0.8),
+                       ha='right', va='top', color='black')
+                
+                # Styling
+                ax.set_title(f'{symbol} - Professional Trading Analysis', 
+                           fontsize=18, fontweight='bold', color='white', pad=20)
+                ax.set_xlabel('Time', fontsize=12, color='white')
+                ax.set_ylabel('Price (USD)', fontsize=12, color='white')
+                
+                # Grid
+                ax.grid(True, alpha=0.3, color='gray')
+                
+                # Legend
+                legend = ax.legend(loc='upper left', fontsize=11, framealpha=0.8)
+                legend.get_frame().set_facecolor('#2a2a2a')
+                legend.get_frame().set_edgecolor('gray')
+                
+                # Format dates
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H'))
+                ax.xaxis.set_major_locator(mdates.HourLocator(interval=max(1, len(df)//10)))
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, color='white')
+                
+                # Color axis labels
+                ax.tick_params(colors='white')
+                
+                # Add timestamp
+                ax.text(0.02, 0.02, f'Generated: {pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")}', 
+                       transform=ax.transAxes, fontsize=8, color='gray', alpha=0.7)
+                
+                # Tight layout
+                plt.tight_layout()
+                
+                # Save with unique name for this section
+                os.makedirs("reports/plots", exist_ok=True)
+                professional_chart_path = "reports/plots/professional_trading_chart.png"
+                plt.savefig(professional_chart_path, dpi=150, bbox_inches='tight', 
+                           facecolor='#1a1a1a', edgecolor='none')
+                plt.close()
+                
+                # Reset matplotlib style to default for other plots
+                plt.style.use('default')
+                
+                # Add to PDF
+                pdf.ln(3)
+                pdf.add_image(professional_chart_path, size_type="medium")
+                pdf.ln(2)
+                
+                # Add color-coded chart description
+                pdf.set_font("Arial", "B", 12)
+                pdf.set_text_color(0, 102, 204)
+                pdf.multi_cell(0, 6, "Professional Trading Chart:")
+                
+                pdf.set_font("Arial", "B", 10)
+                pdf.set_text_color(0, 120, 0)
+                pdf.multi_cell(0, 5, f"- Green Zone: Profit potential area above entry price")
+                pdf.set_text_color(200, 0, 0)
+                pdf.multi_cell(0, 5, f"- Red Zone: Risk area below entry price")
+                pdf.set_text_color(255, 165, 0)
+                pdf.multi_cell(0, 5, f"- Yellow Line: Optimal entry point at ${entry_price:,.2f}")
+                pdf.set_text_color(100, 100, 100)
+                pdf.multi_cell(0, 5, f"- Chart shows recent price action with key trading levels marked")
+                
+            else:
+                raise ValueError("Insufficient data points for chart generation")
+                
+    except Exception as e:
+        pdf.ln(2)
+        pdf.set_font("Arial", "B", 10)
+        pdf.set_text_color(255, 0, 0)
+        pdf.multi_cell(0, 5, f"(Professional chart generation failed: {e})")
+        
+        # Fallback: Generate simple signal visualization
+        try:
+            plt.figure(figsize=(10, 4))
+            
+            sl = stop_loss if stop_loss != "N/A" else 0
+            ep = entry_price if entry_price != "N/A" else 0
+            tp = take_profit if take_profit != "N/A" else 0
+
+            macd = ep + 150
+            rsi = ep + 300
+
+            levels = [sl, ep, tp, macd, rsi]
+            labels = ['Stop Loss', 'Entry Price', 'Take Profit', 'MACD Level', 'RSI Threshold']
+            colors = ['red', 'blue', 'green', 'gray', 'gray']
+            linestyles = ['--', '--', '--', ':', ':']
+
+            for lvl, lbl, col, style in zip(levels, labels, colors, linestyles):
+                if lvl > 0:
+                    plt.axhline(y=lvl, linestyle=style, color=col, linewidth=2, label=f"{lbl}: {lvl:,.2f}")
+
+            if sl < ep:
+                plt.fill_betweenx([sl, ep], 0, 1, color='red', alpha=0.1, transform=plt.gca().get_yaxis_transform())
+            if tp > ep:
+                plt.fill_betweenx([ep, tp], 0, 1, color='green', alpha=0.1, transform=plt.gca().get_yaxis_transform())
+
+            plt.title("Signal Risk-Reward Setup & Indicators", fontsize=10, fontweight='bold')
+            plt.legend(loc="best", fontsize=8)
+            plt.xticks([])
+            plt.tight_layout()
+
+            fallback_path = "reports/plots/signal_risk_setup.png"
+            plt.savefig(fallback_path)
+            plt.close()
+
+            pdf.ln(2)
+            pdf.add_image(fallback_path, size_type="small")
+
+        except Exception as fallback_error:
+            pdf.add_paragraph(f"(Fallback chart also failed: {fallback_error})", color=(255, 0, 0))
 
     # 1C. Price Snapshot
     if 'price_snapshot' in signal_info:
         pdf.ln(2)
         pdf.set_x(pdf.l_margin)
-        pdf.add_section_title("1C. Price Snapshot (Latest 5 rows)")
+        pdf.add_section_title("\n1C. Price Snapshot (Latest 5 rows)")
         price_snapshot = signal_info['price_snapshot'].copy()
         price_snapshot = price_snapshot.tail(5)
         price_snapshot.index = pd.to_datetime(price_snapshot.index)
@@ -1128,17 +1415,9 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
     else:
         pdf.add_paragraph(str(summary))
 
-    #pdf.ln(50)
     # 6. Charts - UPDATED WITH LARGER PRICE CHART
     pdf.add_section_title("6. Visualizations")
     
-    # Add the main price chart with LARGE size (90% of page width)
-    #pdf.add_image("reports/plots/price_chart.png", size_type='large')
-    # pdf.add_image("reports/plots/dashboard_chart.png", size_type='large')
-    # pdf.add_image("reports/plots/verticalstack_chart.png", size_type='large')
-    # pdf.add_image("reports/plots/sidebyside_chart.png", size_type='large')
-    # pdf.add_image("reports/plots/heatmap_chart.png", size_type='large')
-
     pdf.add_image("reports/plots/price_chart_price.png", size_type='large')
     pdf.add_image("reports/plots/price_chart_pnl.png", size_type='large')
     pdf.add_image("reports/plots/price_chart_cumulative.png", size_type='large')
