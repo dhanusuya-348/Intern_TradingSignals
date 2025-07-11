@@ -153,7 +153,7 @@ def run_backtest(price_df, symbol, interval, headlines, price_data_dict):
             "stop_loss": stop_loss,
             "take_profit": take_profit,
             "estimated_duration_minutes": estimated_duration_minutes,
-            "risk_reward_ratio": risk_info["risk_reward_ratio"],
+            "risk_reward_ratio": risk_info["risk_reward_label"],
             "expected_profit_percent": risk_info["expected_profit_percent"],
             "risk_level": risk_info["risk_level"],
             "exit_reason": exit_reason,

@@ -437,21 +437,23 @@ class PDFReport(FPDF):
         col_widths = {
             "timestamp": 25,
             "Timestamp": 25,
-            "coin": 18,  # Slightly wider for icon + text
+            "coin": 15,  # Slightly wider for icon + text
             "open": 16,
             "close": 16,
-            "rsi": 10,
+            "rsi": 9,
             "macd": 12,
             "bollinger": 18,
-            "sentiment": 16,
-            "volatility": 15,
-            "signal": 14,
-            "confidence": 16,
-            "exit_price": 18,
-            "take_profit": 18,
-            "stop_loss": 18,
-            "exit_reason": 16,
-            "Return %": 14,
+            "news": 8,
+            "volatility": 14,
+            "signal": 11,
+            "risk:reward": 19,
+            "duration": 15,
+            "conf": 10,
+            "exit_price": 16,
+            "take_profit": 16,
+            "stop_loss": 16,
+            "exit_rsn": 13,
+            "return%": 12,
             "result": 14,
             "Snapshot Time": 26,
             "Close": 16,
@@ -701,8 +703,8 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
     # --- Add Risk & Trade Parameters ---
     pdf.ln(2)
     pdf.set_text_color(0, 0, 139)
-    pdf.set_font("Arial", "B", 12)
-    pdf.multi_cell(0, 6, "Risk & Trade Parameters:\n\n")
+    pdf.set_font("Arial", "B", 10)
+    pdf.multi_cell(0, 6, "\nRisk & Trade Parameters:\n\n")
 
     # Entry Price
     pdf.set_font("Arial", "B", 10)
@@ -861,8 +863,8 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
                 
                 # Add color-coded chart description
                 pdf.set_font("Arial", "B", 12)
-                pdf.set_text_color(0, 102, 204)
-                pdf.multi_cell(0, 6, "Professional Trading Chart:")
+                pdf.set_text_color(0, 0, 139)
+                pdf.multi_cell(0, 6, "\nProfessional Trading Chart:\n\n")
                 
                 pdf.set_font("Arial", "B", 10)
                 pdf.set_text_color(0, 120, 0)
@@ -1256,7 +1258,7 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
             print(f"Plotting error: {e}")  # For debugging
 
     # 2. Risk Management
-    pdf.add_section_title("2. Risk Management")
+    pdf.add_section_title("\n\n2. Risk Management")
 
     # Extract entry price
     entry_price = "N/A"
@@ -1346,7 +1348,7 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
         pdf.add_paragraph(f"(Plot Error: {e})", color=(255, 0, 0))
 
     # 3. Timing
-    pdf.add_section_title("3. Signal Timing")
+    pdf.add_section_title("\n\n3. Signal Timing")
 
     start = timing_info['start']
     end = timing_info['end']
@@ -1432,16 +1434,30 @@ def format_backtest_table(df, max_rows=30):
     columns = [
         "timestamp", "coin", "open", "close", "rsi", "macd",
         "bollinger", "sentiment", "volatility", "signal", "confidence",
-        "exit_price", "take_profit", "stop_loss", "exit_reason",
+        "exit_price", "take_profit", "stop_loss", "risk_reward_ratio", "estimated_duration_minutes", "exit_reason",  # FIXED: Use correct column names
         "net_return_percent", "result"
     ]
     df = df[columns].copy()
     df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Format price columns
     for col in ["open", "close", "exit_price", "take_profit", "stop_loss"]:
         df[col] = df[col].apply(lambda x: "{:,.2f}".format(x))
+    
+    # Format other columns
     df["rsi"] = df["rsi"].round(1)
+    #df["risk_reward_ratio"] = df["risk_reward_ratio"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "-")  # FIXED: Format R:R properly
+    df["estimated_duration_minutes"] = df["estimated_duration_minutes"].apply(lambda x: f"{int(x)}mins" if pd.notna(x) else "-")  # FIXED: Format duration
     df["net_return_percent"] = df["net_return_percent"].round(2)
 
-    df.rename(columns={"net_return_percent": "Return %"}, inplace=True)
+    # Rename columns for display
+    df.rename(columns={
+        "net_return_percent": "return%",
+        "risk_reward_ratio": "risk:reward",
+        "estimated_duration_minutes": "duration",
+        "confidence": "conf",
+        "exit_reason": "exit_rsn",
+        "sentiment": "news"
+    }, inplace=True)
 
     return df.tail(max_rows).reset_index(drop=True)

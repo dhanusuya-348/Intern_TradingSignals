@@ -65,7 +65,7 @@ def print_detailed_backtest_table(df):
     table.field_names = [
         "Time", "Coin", "Open", "Close", "Profit/Loss %", "RSI",
         "Volatility", "MACD", "Sentiment", "BB", "Signal", "Confidence", "Result",
-        "Exit", "TP", "SL", "Exit Reason", "Duration (min)"
+        "Exit", "TP", "SL", "R:R", "Exit Reason", "Duration (min)"
     ]
 
     for _, row in df.iterrows():
@@ -92,6 +92,7 @@ def print_detailed_backtest_table(df):
             safe_val(row.get("exit_price", 0.0)),
             safe_val(row.get("take_profit", 0.0)),
             safe_val(row.get("stop_loss", 0.0)),
+            safe_val(row.get("risk_reward_ratio", "-")),  # FIXED: Moved to correct position
             row.get("exit_reason", "-"),
             row.get("estimated_duration_minutes", "-")
         ])
