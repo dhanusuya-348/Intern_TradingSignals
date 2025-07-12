@@ -446,7 +446,7 @@ class PDFReport(FPDF):
             "news": 8,
             "volatility": 14,
             "signal": 11,
-            "reward:risk": 19,
+            "risk:reward": 19,
             "duration": 15,
             "conf": 10,
             "exit_price": 16,
@@ -749,12 +749,22 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
     pdf.ln(1)
     pdf.set_text_color(90, 60, 0)
     pdf.set_font("Arial", "B", 10)
-    pdf.multi_cell(0, 5, (
-        f"\nThe system identified {entry_price:,.2f} as the best entry point, with downside risk managed at {stop_loss:,.2f} "
-        f"and target reward at {take_profit:,.2f}. Based on these, a {profit_percent} % gain was expected. "
-        f"Risk-Reward stood at {rrr}, and the signal is considered valid for {duration}. "
-        "This setup reflects a strong probability for price action favoring the trade direction."
-    ))
+    
+    # Different contextual summaries based on signal type
+    if signal in ["BUY", "SELL"]:
+        pdf.multi_cell(0, 5, (
+            f"\nThe system identified {entry_price:,.2f} as the best entry point, with downside risk managed at {stop_loss:,.2f} "
+            f"and target reward at {take_profit:,.2f}. Based on these, a {profit_percent} % gain was expected. "
+            f"Risk-Reward stood at {rrr}, and the signal is considered valid for {duration}. "
+            "This setup reflects a strong probability for price action favoring the trade direction."
+        ))
+    else:  # HOLD signal
+        pdf.multi_cell(0, 5, (
+            f"\nThe system determined that current market conditions do not favor taking a position at this time. "
+            f"With the current price around {entry_price:,.2f}, the analysis suggests waiting for clearer directional signals. "
+            f"This recommendation remains valid for {duration}, during which continued monitoring is advised. "
+            "The system will reassess conditions and may provide actionable signals when market dynamics improve."
+        ))
 
     # --- Generate Professional Trading Chart ---
     try:
@@ -1494,7 +1504,7 @@ def format_backtest_table(df, max_rows=30):
     # Rename columns for display
     df.rename(columns={
         "net_return_percent": "return%",
-        "risk_reward_ratio": "reward:risk",
+        "risk_reward_ratio": "risk:reward",
         "estimated_duration_minutes": "duration",
         "confidence": "conf",
         "exit_reason": "exit_rsn",
