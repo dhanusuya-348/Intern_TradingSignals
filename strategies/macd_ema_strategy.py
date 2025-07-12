@@ -1,3 +1,4 @@
+#strategies\macd_ema_strategy.py
 from indicators.macd import calculate_macd
 from indicators.trend import calculate_ema
 

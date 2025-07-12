@@ -1,3 +1,5 @@
+#strategies\trend_sentiment_strategy.py
+
 from indicators.trend import identify_trend
 
 def trend_sentiment_signal(df, sentiment):

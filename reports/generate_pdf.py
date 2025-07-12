@@ -1072,7 +1072,7 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
         macd_color = pdf.get_signal_color(macd_value)
         pdf.set_font("Arial", "B", 10)
         pdf.set_text_color(*macd_color)
-        pdf.multi_cell(0, 6, f"MACD Signal: {macd_value} (Timeframe: {timeframe_str}, Fast EMA: 12, Slow EMA: 26, Signal: 9)")
+        pdf.multi_cell(0, 6, f"MACD Signal: {macd_value} (Timeframe: {timeframe_str}, Fast EMA: 50, Slow EMA: 200, Signal: 9)")
         
         pdf.set_font("Arial", "", 8)
         pdf.set_text_color(50, 50, 50)
@@ -1089,7 +1089,7 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
 
         pdf.set_font("Arial", "", 8)
         pdf.set_text_color(50, 50, 50)
-        pdf.multi_cell(0, 5, "RSI (Relative Strength Index) measures momentum. Values above 70 may indicate overbought (SELL zone), while values below 30 may indicate oversold (BUY zone).")
+        pdf.multi_cell(0, 5, "RSI (Relative Strength Index) measures momentum. Values above 75 may indicate overbought (SELL zone), while values below 25 may indicate oversold (BUY zone).")
 
         # === Bollinger Bands ===
         bb_signal = ind.get('bb', 'N/A')
@@ -1131,19 +1131,26 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
             
             # Calculate technical indicators if they don't exist
             if 'macd_line' not in df.columns or 'macd_signal' not in df.columns:
-                # Simple MACD calculation
-                exp1 = df['close'].ewm(span=12).mean()
-                exp2 = df['close'].ewm(span=26).mean()
+                # *** IMPORTANT: Use same MACD calculation as your indicator logic ***
+                # Using EMA-50 and EMA-200 to match your indicators/macd.py
+                exp1 = df['close'].ewm(span=50, adjust=False).mean()  # EMA-50
+                exp2 = df['close'].ewm(span=200, adjust=False).mean()  # EMA-200
                 df['macd_line'] = exp1 - exp2
-                df['macd_signal'] = df['macd_line'].ewm(span=9).mean()
+                df['macd_signal'] = df['macd_line'].ewm(span=9, adjust=False).mean()
                 df['macd_histogram'] = df['macd_line'] - df['macd_signal']
             
             if 'rsi' not in df.columns:
-                # Simple RSI calculation
+                # RSI calculation matching your indicators/rsi.py
                 delta = df['close'].diff()
-                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                rs = gain / loss
+                gain = delta.where(delta > 0, 0.0)
+                loss = -delta.where(delta < 0, 0.0)
+                
+                # Use exponential moving average for more responsive RSI (same as your indicator)
+                alpha = 1.0 / 14
+                avg_gain = gain.ewm(alpha=alpha, adjust=False).mean()
+                avg_loss = loss.ewm(alpha=alpha, adjust=False).mean()
+                
+                rs = avg_gain / avg_loss
                 df['rsi'] = 100 - (100 / (1 + rs))
             
             if 'upper_band' not in df.columns or 'lower_band' not in df.columns:
@@ -1169,7 +1176,7 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
             # --- Price + Bollinger Bands ---
             axes[0].plot(df.index, df['close'], color='#1f77b4', linewidth=2, label='Close Price')
             axes[0].fill_between(df.index, df['lower_band'], df['upper_band'], 
-                               color='lightblue', alpha=0.3, label='Bollinger Bands')
+                            color='lightblue', alpha=0.3, label='Bollinger Bands')
             axes[0].plot(df.index, df['upper_band'], color='red', linestyle='--', alpha=0.7, linewidth=1)
             axes[0].plot(df.index, df['lower_band'], color='red', linestyle='--', alpha=0.7, linewidth=1)
             axes[0].plot(df.index, df['middle_band'], color='orange', linestyle='-', alpha=0.7, linewidth=1, label='Middle Band (SMA 20)')
@@ -1182,54 +1189,88 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
             # Add current price annotation
             current_price = df['close'].iloc[-1]
             axes[0].annotate(f'Current: ${current_price:.2f}', 
-                           xy=(df.index[-1], current_price), 
-                           xytext=(10, 10), textcoords='offset points',
-                           bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
-                           fontsize=8)
+                        xy=(df.index[-1], current_price), 
+                        xytext=(10, 10), textcoords='offset points',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
+                        fontsize=8)
 
             # --- MACD ---
             axes[1].plot(df.index, df['macd_line'], label='MACD Line', color='blue', linewidth=2)
             axes[1].plot(df.index, df['macd_signal'], label='Signal Line', color='red', linewidth=2)
             axes[1].bar(df.index, df['macd_histogram'], label='Histogram', color='green', alpha=0.6, width=0.8)
             axes[1].axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.8)
-            axes[1].set_title("MACD Indicator", fontsize=12, fontweight='bold')
+            axes[1].set_title("MACD Indicator (EMA-50/200)", fontsize=12, fontweight='bold')
             axes[1].legend(loc='upper left', fontsize=8)
             axes[1].grid(True, alpha=0.3)
             axes[1].set_ylabel('MACD', fontsize=10)
             
-            # Add MACD signal annotation
-            current_macd = df['macd_line'].iloc[-1]
-            current_signal = df['macd_signal'].iloc[-1]
-            macd_position = "Bullish" if current_macd > current_signal else "Bearish"
-            axes[1].annotate(f'MACD: {macd_position}', 
-                           xy=(df.index[-1], current_macd), 
-                           xytext=(10, 10), textcoords='offset points',
-                           bbox=dict(boxstyle='round,pad=0.3', 
-                                   facecolor='lightgreen' if macd_position == "Bullish" else 'lightcoral', 
-                                   alpha=0.7),
-                           fontsize=8)
+            # *** MACD SIGNAL DETECTION MATCHING YOUR INDICATOR LOGIC ***
+            # Use the same logic as your indicators/macd.py
+            current_hist = df['macd_histogram'].iloc[-1]
+            prev_hist = df['macd_histogram'].iloc[-2] if len(df) >= 2 else current_hist
+            
+            # Noise filter: Ignore tiny fluctuations (same as your indicator)
+            threshold = 0.3
+
+            if current_hist > threshold and prev_hist <= threshold:
+                macd_position = "Bullish"
+            elif current_hist < -threshold and prev_hist >= -threshold:
+                macd_position = "Bearish"
+            elif current_hist > prev_hist and current_hist > threshold:
+                macd_position = "Bullish"
+            elif current_hist < prev_hist and current_hist < -threshold:
+                macd_position = "Bearish"
+            elif abs(current_hist) < threshold:
+                macd_position = "Neutral"
+            else:
+                macd_position = "Bullish" if current_hist > 0 else "Bearish"
+            
+            # Determine color based on signal
+            if "Bullish" in macd_position:
+                macd_annotation_color = 'lightgreen'
+            elif "Bearish" in macd_position:
+                macd_annotation_color = 'lightcoral'
+            else:
+                macd_annotation_color = 'lightyellow'
+            
+            axes[1].annotate(f'MACD: {macd_position} (Hist: {current_hist:.2f})', 
+                        xy=(df.index[-1], df['macd_line'].iloc[-1]), 
+                        xytext=(10, 10), textcoords='offset points',
+                        bbox=dict(boxstyle='round,pad=0.3', 
+                                facecolor=macd_annotation_color, 
+                                alpha=0.7),
+                        fontsize=8)
 
             # --- RSI ---
             axes[2].plot(df.index, df['rsi'], label='RSI', color='purple', linewidth=2)
-            axes[2].axhline(70, linestyle='--', color='red', linewidth=1, alpha=0.7, label='Overbought (70)')
-            axes[2].axhline(30, linestyle='--', color='green', linewidth=1, alpha=0.7, label='Oversold (30)')
+            # Updated to match your indicator thresholds (75/25 instead of 70/30)
+            axes[2].axhline(75, linestyle='--', color='red', linewidth=1, alpha=0.7, label='Overbought (75)')
+            axes[2].axhline(25, linestyle='--', color='green', linewidth=1, alpha=0.7, label='Oversold (25)')
             axes[2].axhline(50, linestyle='-', color='gray', linewidth=0.8, alpha=0.5)
-            axes[2].fill_between(df.index, 30, 70, alpha=0.1, color='gray')
+            axes[2].fill_between(df.index, 25, 75, alpha=0.1, color='gray')
             axes[2].set_title("RSI Indicator", fontsize=12, fontweight='bold')
             axes[2].legend(loc='upper left', fontsize=8)
             axes[2].grid(True, alpha=0.3)
             axes[2].set_ylabel('RSI', fontsize=10)
             axes[2].set_ylim(0, 100)
             
-            # Add RSI level annotation
+            # RSI level annotation matching your indicator logic (75/25 thresholds)
             current_rsi = df['rsi'].iloc[-1]
-            rsi_level = "Overbought" if current_rsi > 75 else "Oversold" if current_rsi < 25 else "Neutral"
-            rsi_color = 'lightcoral' if current_rsi > 75 else 'lightgreen' if current_rsi < 25 else 'lightyellow'
+            if current_rsi > 75:
+                rsi_level = "Overbought"
+                rsi_color = 'lightcoral'
+            elif current_rsi < 25:
+                rsi_level = "Oversold"
+                rsi_color = 'lightgreen'
+            else:
+                rsi_level = "Neutral"
+                rsi_color = 'lightyellow'
+                
             axes[2].annotate(f'RSI: {current_rsi:.1f} ({rsi_level})', 
-                           xy=(df.index[-1], current_rsi), 
-                           xytext=(10, 10), textcoords='offset points',
-                           bbox=dict(boxstyle='round,pad=0.3', facecolor=rsi_color, alpha=0.7),
-                           fontsize=8)
+                        xy=(df.index[-1], current_rsi), 
+                        xytext=(10, 10), textcoords='offset points',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor=rsi_color, alpha=0.7),
+                        fontsize=8)
 
             # Format x-axis
             axes[2].xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))

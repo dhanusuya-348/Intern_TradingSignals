@@ -1,3 +1,5 @@
+#strategies\bollinger_squeezer_strategy.py
+
 from indicators.bollinger import calculate_bollinger_bands
 
 def bollinger_squeeze_signal(df):
